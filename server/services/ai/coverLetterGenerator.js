@@ -1,0 +1,236 @@
+const { GoogleGenAI } = require("@google/genai");
+
+// Reuse the same client pattern as resumeExtractor.js
+const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY
+});
+
+/**
+ * Build a compact, structured summary of the user's
+ * profile. Only fields present in the profile are
+ * included — nothing is invented.
+ */
+const buildProfileSummary = (profile) => {
+
+    const lines = [];
+
+    if (profile.fullName) {
+        lines.push(`Name: ${profile.fullName}`);
+    }
+
+    if (profile.headline) {
+        lines.push(`Headline: ${profile.headline}`);
+    }
+
+    if (profile.summary) {
+        lines.push(`Summary: ${profile.summary}`);
+    }
+
+    const skills = Array.isArray(profile.skills)
+        ? profile.skills.filter(Boolean)
+        : [];
+
+    if (skills.length > 0) {
+        lines.push(`Skills: ${skills.join(", ")}`);
+    }
+
+    const experience = Array.isArray(profile.experience)
+        ? profile.experience.filter(
+              (e) => e.company || e.role
+          )
+        : [];
+
+    if (experience.length > 0) {
+        lines.push("\nWork Experience:");
+        experience.forEach((e) => {
+            const period = [e.startDate, e.endDate]
+                .filter(Boolean)
+                .join(" – ");
+
+            lines.push(
+                `  • ${e.role || "Role"} at ${e.company || "Company"}${period ? ` (${period})` : ""}${e.description ? `: ${e.description}` : ""}`
+            );
+        });
+    }
+
+    const education = Array.isArray(profile.education)
+        ? profile.education.filter(
+              (e) => e.institution || e.degree
+          )
+        : [];
+
+    if (education.length > 0) {
+        lines.push("\nEducation:");
+        education.forEach((e) => {
+            const deg = [e.degree, e.field]
+                .filter(Boolean)
+                .join(" in ");
+
+            const period = [e.startDate, e.endDate]
+                .filter(Boolean)
+                .join(" – ");
+
+            lines.push(
+                `  • ${deg || "Degree"}${e.institution ? ` — ${e.institution}` : ""}${period ? ` (${period})` : ""}${e.cgpa ? `, CGPA: ${e.cgpa}` : ""}`
+            );
+        });
+    }
+
+    const projects = Array.isArray(profile.projects)
+        ? profile.projects.filter((p) => p.name)
+        : [];
+
+    if (projects.length > 0) {
+        lines.push("\nProjects:");
+        projects.forEach((p) => {
+            const tech = Array.isArray(p.technologies)
+                ? p.technologies.join(", ")
+                : "";
+
+            lines.push(
+                `  • ${p.name}${tech ? ` (${tech})` : ""}${p.description ? `: ${p.description}` : ""}`
+            );
+        });
+    }
+
+    return lines.join("\n");
+};
+
+
+/**
+ * Generate a personalised cover letter using the
+ * user's saved profile and a specific job.
+ *
+ * @param {Object} profile  - Mongoose Profile document (lean)
+ * @param {Object} job      - Mongoose Job document (lean or populated)
+ * @returns {string}        - Generated cover letter text
+ * @throws {Error}          - If profile/job info is insufficient or Gemini fails
+ */
+const generateCoverLetter = async (profile, job) => {
+
+    // ── Guards ──────────────────────────────────────────
+
+    if (!profile) {
+        throw new Error(
+            "Profile not found. Please upload your resume first."
+        );
+    }
+
+    if (!job) {
+        throw new Error(
+            "Job information is missing."
+        );
+    }
+
+    const profileSummary = buildProfileSummary(profile);
+
+    if (!profileSummary.trim()) {
+        throw new Error(
+            "Your profile does not contain enough information to generate a cover letter. Please upload your resume."
+        );
+    }
+
+    const jobTitle   = job.title   || "this position";
+    const jobCompany = job.company || "your company";
+
+    // Trim description to keep prompt within token limits
+    const jobDescription = (job.description || "")
+        .slice(0, 1500);
+
+    // ── Prompt ──────────────────────────────────────────
+
+    const prompt = `
+You are a professional career coach writing a cover letter.
+
+IMPORTANT RULES:
+- Use ONLY the information provided in the candidate's profile below.
+- Do NOT invent work experience, qualifications, achievements, or personal details.
+- Do NOT exaggerate or embellish any information.
+- If the profile lacks specific experience for the role, write honestly about transferable skills and eagerness to learn.
+- Keep the letter concise: 3–4 short paragraphs, professional tone.
+- Use plain text only — no markdown formatting, no bullet points.
+- Do not include a date. Do not include placeholder fields like [Your Name] or [Address].
+- End with "Sincerely," followed by the candidate's name.
+
+CANDIDATE PROFILE:
+${profileSummary}
+
+JOB:
+Title: ${jobTitle}
+Company: ${jobCompany}
+${jobDescription ? `Description:\n${jobDescription}` : ""}
+
+Write a professional cover letter for this candidate applying to this role.
+`.trim();
+
+    // ── Call Gemini (with retry for transient 503) ───────
+
+    const MODEL =
+        process.env.GEMINI_MODEL ||
+        "gemini-3.5-flash";
+
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY_MS = 2000;
+
+    let text;
+    let lastError;
+
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+
+        try {
+            const response =
+                await ai.models.generateContent({
+                    model: MODEL,
+                    contents: prompt
+                });
+
+            text = response.text;
+            break; // success — exit retry loop
+
+        } catch (error) {
+
+            lastError = error;
+
+            const is503 =
+                error.message?.includes("503") ||
+                error.message?.includes("UNAVAILABLE") ||
+                error.message?.includes("high demand");
+
+            if (is503 && attempt < MAX_RETRIES) {
+                console.warn(
+                    `Gemini 503 on attempt ${attempt}/${MAX_RETRIES}, retrying in ${RETRY_DELAY_MS}ms...`
+                );
+
+                await new Promise((resolve) =>
+                    setTimeout(resolve, RETRY_DELAY_MS)
+                );
+
+                continue;
+            }
+
+            // Non-retriable error or last attempt
+            console.error(
+                "Gemini cover letter error:",
+                error.message
+            );
+
+            throw new Error(
+                "AI generation failed. Please try again."
+            );
+        }
+    }
+
+    if (!text || !text.trim()) {
+        throw new Error(
+            "Gemini returned an empty response. Please try again."
+        );
+    }
+
+    return text.trim();
+};
+
+
+
+module.exports = {
+    generateCoverLetter
+};

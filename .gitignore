@@ -1,0 +1,30 @@
+﻿# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-ssr/
+build/
+.next/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local/editor files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# User uploads and local data
+server/uploads/
+
+# Local temporary files
+*.local
