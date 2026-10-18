@@ -1,270 +1,179 @@
+/**
+ * jobController.js
+ *
+ * GET /api/jobs/search  (protected)
+ *   - Searches configured job sources via the aggregator (cached).
+ *   - For each job, computes a per-user "Estimated Match" score from the
+ *     authenticated user's saved resume text + skills (NO AI needed).
+ *   - Returns real jobs even when the user has no resume yet: the match
+ *     score is null and `profileReady` is false so the frontend can prompt
+ *     the user to upload a resume.
+ *   - Search-link fallback cards (`isSearchLink`) are returned but NOT
+ *     persisted to the shared Job collection, so dashboard "jobs found"
+ *     counts only reflect real listings.
+ */
+
 const Job = require("../models/Job");
 const Profile = require("../models/Profile");
+const aggregator = require("../services/jobSearch/aggregator");
+const { calculateMatch } = require("../services/ai/matcher");
 
-const aggregator =
-    require("../services/jobSearch/aggregator");
+/**
+ * Upsert a real (non-search-link) job's metadata into the shared Job
+ * collection so Applications can reference it. Never stores the per-user
+ * match score on the shared doc (scores are user-specific).
+ * Returns the saved doc as a plain object.
+ */
+const upsertJobMeta = async (job) => {
+    const existing = await Job.findOne({
+        externalId: job.externalId,
+        source: job.source
+    });
 
-const {
-    calculateMatchScore
-} = require("../services/ai/matcher");
+    if (existing) {
+        existing.title = job.title;
+        existing.company = job.company;
+        existing.location = job.location;
+        existing.workMode = job.workMode;
+        existing.employmentType = job.employmentType;
+        existing.description = job.description;
+        existing.skills = job.skills;
+        existing.salary = job.salary;
+        existing.sourceUrl = job.sourceUrl;
+        existing.applyUrl = job.applyUrl;
+        existing.postedDate = job.postedDate;
+        await existing.save();
+        return existing.toObject();
+    }
+
+    const created = await Job.create({ ...job });
+    return created.toObject();
+};
 
 const searchJobs = async (req, res) => {
     try {
-        const {
-            query = "",
-            location = "",
-            source = ""
-        } = req.query;
+        const { query = "", location = "", source = "" } = req.query;
 
-        // =====================================
-        // GET USER PROFILE
-        // =====================================
-
-        const profile =
-            await Profile.findOne({
-                clerkId: req.clerkId
-            }).lean();
-
-        console.log("\n==============================");
-        console.log("JOB MATCHING");
-        console.log("==============================");
-
-        console.log(
-            "Clerk ID:",
-            req.clerkId
-        );
-
-        console.log(
-            "Profile found:",
-            !!profile
-        );
-
-        // STOP if profile doesn't exist
-        if (!profile) {
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Profile not found. Please upload your resume first."
-            });
+        // Fetch the user's profile. A DB read blip must NOT prevent the search
+        // from running: degrade gracefully (no profile → 0% match, but live
+        // jobs AND search-link fallback cards still surface to the UI).
+        let profile = null;
+        let profileReady = false;
+        try {
+            profile = await Profile.findOne({ clerkId: req.clerkId }).lean();
+            profileReady =
+                !!(profile &&
+                    profile.resumeText &&
+                    String(profile.resumeText).trim());
+        } catch (dbError) {
+            console.error(
+                "Profile lookup failed during job search (continuing):",
+                dbError.message
+            );
         }
 
-        console.log(
-            "Profile name:",
-            profile.fullName
-        );
-
-        console.log(
-            "Profile skills:",
-            profile.skills
-        );
-
-        console.log(
-            "Profile keywords:",
-            profile.keywords
-        );
-
-        console.log(
-            "Profile roles:",
-            profile.preferences?.roles
-        );
-
-        console.log(
-            "Resume characters:",
-            profile.resumeText?.length || 0
-        );
-
-        // =====================================
-        // SEARCH JOBS
-        // =====================================
-
-        const jobs =
-            await aggregator.search({
-                query,
-                location,
-                source
-            });
-
-        console.log(
-            "Jobs received:",
-            jobs.length
-        );
-
-        // =====================================
-        // UPSERT JOBS + CALCULATE MATCH SCORES
-        //
-        // matchScore is calculated fresh for the
-        // CURRENT user's profile on every request.
-        // It is NOT written to the shared Job doc
-        // in MongoDB — that would overwrite scores
-        // for every other user.
-        //
-        // Job metadata (title, company, etc.) IS
-        // upserted so Applications can reference it.
-        // =====================================
+        // Search external sources (cached inside the aggregator).
+        const jobs = await aggregator.search({ query, location, source });
 
         const responseJobs = [];
 
         for (const job of jobs) {
-
-            // Calculate per-user score
-            const matchScore =
-                calculateMatchScore(
-                    profile,
-                    job
-                );
-
-            console.log(
-                `${job.title} -> ${matchScore}%`
-            );
-
-            // =================================
-            // UPSERT JOB METADATA (no score)
-            // =================================
-
-            let savedJob;
-
-            const existing =
-                await Job.findOne({
-                    externalId:
-                        job.externalId,
-                    source:
-                        job.source
-                });
-
-            if (existing) {
-
-                existing.title =
-                    job.title;
-
-                existing.company =
-                    job.company;
-
-                existing.location =
-                    job.location;
-
-                existing.workMode =
-                    job.workMode;
-
-                existing.employmentType =
-                    job.employmentType;
-
-                existing.description =
-                    job.description;
-
-                existing.skills =
-                    job.skills;
-
-                existing.salary =
-                    job.salary;
-
-                existing.sourceUrl =
-                    job.sourceUrl;
-
-                existing.applyUrl =
-                    job.applyUrl;
-
-                existing.postedDate =
-                    job.postedDate;
-
-                // Do NOT save matchScore to the
-                // shared Job document.
-
-                savedJob =
-                    await existing.save();
-
+            // Compute a per-user match only for REAL listings. Search-link
+            // cards carry no real data and must never claim a match score.
+            let matchResult;
+            if (job.isSearchLink) {
+                matchResult = {
+                    matchPercentage: 0,
+                    matchedSkills: [],
+                    missingSkills: [],
+                    explanation:
+                        "Search-link result — no match score computed.",
+                    components: {
+                        skills: 0,
+                        role: 0,
+                        description: 0
+                    }
+                };
             } else {
-
-                // Create without persisting matchScore
-                savedJob =
-                    await Job.create({
-                        ...job
-                        // matchScore intentionally omitted
-                    });
+                matchResult = calculateMatch(profile, job);
             }
 
-            // Attach per-user score to the response
-            // object only (not in the DB document).
+            // Persist real jobs only (search-link cards are NOT real listings).
+            let saved = job;
+            if (!job.isSearchLink) {
+                try {
+                    saved = await upsertJobMeta(job);
+                } catch (persistError) {
+                    // A DB hiccup for one job must not break the whole response.
+                    console.error("Job upsert failed:", persistError.message);
+                    saved = job;
+                }
+            }
+
             responseJobs.push({
-                ...savedJob.toObject(),
-                matchScore
+                ...(typeof saved === "object" ? saved : job),
+                // Ensure a stable object id for React keys even for search-link cards.
+                _id: saved && saved._id ? String(saved._id) : job.externalId,
+                matchScore: matchResult.matchPercentage ?? 0,
+                profileReady,
+                matchResult
             });
         }
 
-        // =====================================
-        // SORT BY MATCH
-        // =====================================
-
-        responseJobs.sort(
-            (a, b) =>
-                (b.matchScore || 0) -
-                (a.matchScore || 0)
+        // Sort by resume-match score (desc). Jobs with null scores sink to top
+        // only when everything is null; otherwise they sort lowest.
+        responseJobs.sort((a, b) =>
+            (b.matchResult?.matchPercentage ?? -1) -
+            (a.matchResult?.matchPercentage ?? -1)
         );
 
-        console.log(
-            "Top scores:",
-            responseJobs
-                .slice(0, 10)
-                .map(
-                    (job) =>
-                        `${job.title}: ${job.matchScore}%`
-                )
-        );
-
-        console.log(
-            "==============================\n"
-        );
+        // Return only non-sensitive profile fields the frontend needs.
+        const profileSummary = profile
+            ? {
+                  fullName: profile.fullName || "",
+                  skills: Array.isArray(profile.skills) ? profile.skills : [],
+                  resumeFileName: profile.resumeFileName || "",
+                  resumeTextChars: profile.resumeText ? String(profile.resumeText).length : 0
+              }
+            : null;
 
         res.json({
             success: true,
-            count:
-                responseJobs.length,
-            jobs:
-                responseJobs
+            count: responseJobs.length,
+            profileReady,
+            profile: profileSummary,
+            jobs: responseJobs
         });
-
     } catch (error) {
-
-        console.error(
-            "Job search error:",
-            error
-        );
-
+        console.error("Job search error:", error);
         res.status(500).json({
             success: false,
-            message:
-                error.message
+            message: error.message || "Failed to search jobs."
         });
     }
 };
 
+/**
+ * GET /api/jobs
+ * Return jobs currently persisted in the DB (used for saved-job reference).
+ * Sorted by most recently created.
+ */
 const getJobs = async (req, res) => {
     try {
-
-        const jobs =
-            await Job.find()
-                .sort({
-                    matchScore: -1,
-                    createdAt: -1
-                })
-                .limit(100);
-
-        res.json({
-            success: true,
-            jobs
-        });
-
+        const jobs = await Job.find()
+            .sort({ createdAt: -1 })
+            .limit(100);
+        res.json({ success: true, jobs });
     } catch (error) {
-
         res.status(500).json({
             success: false,
-            message:
-                error.message
+            message: error.message
         });
     }
 };
 
 module.exports = {
     searchJobs,
-    getJobs
+    getJobs,
+    upsertJobMeta
 };
-

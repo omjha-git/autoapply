@@ -6,7 +6,6 @@ const cors = require("cors");
 const { clerkMiddleware } = require("@clerk/express");
 
 const connectDB = require("./config/db");
-
 const profileRoutes = require("./routes/profileRoutes");
 const jobRoutes = require("./routes/jobRoutes");
 const applicationRoutes = require("./routes/applicationRoutes");
@@ -15,6 +14,8 @@ const applicationRoutes = require("./routes/applicationRoutes");
 connectDB();
 
 const app = express();
+
+app.disable("x-powered-by");
 
 app.use(
     cors({
@@ -32,15 +33,21 @@ app.use("/uploads", express.static("uploads"));
 app.get("/", (req, res) => {
     res.json({
         success: true,
-        message: "AutoApply API is running 🚀"
+        message: "AutoApply API is running"
     });
 });
 
 app.get("/api/health", (req, res) => {
+    const dbConnected = connectDB.isDBConnected
+        ? connectDB.isDBConnected()
+        : false;
+
     res.json({
         success: true,
         service: "AutoApply API",
-        status: "healthy"
+        status: dbConnected ? "healthy" : "degraded",
+        database: dbConnected ? "connected" : "disconnected",
+        timestamp: new Date().toISOString()
     });
 });
 

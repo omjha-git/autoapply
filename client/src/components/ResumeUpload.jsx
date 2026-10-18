@@ -2,6 +2,10 @@ import { useState } from "react";
 
 import { useAuth } from "@clerk/react";
 
+import {
+    FileText
+} from "lucide-react";
+
 import api from "../services/api";
 
 export default function ResumeUpload({
@@ -9,73 +13,103 @@ export default function ResumeUpload({
 }) {
     const { getToken } = useAuth();
 
-    const [file, setFile] =
-        useState(null);
-
-    const [loading, setLoading] =
-        useState(false);
-
-    const [message, setMessage] =
-        useState("");
+    const [file, setFile] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [message, setMessage] = useState("");
 
     const upload = async () => {
         if (!file) {
-            setMessage(
-                "Please select your resume."
-            );
+            setMessage("Please select your resume.");
+            return;
+        }
 
+        const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+        if (file.size > MAX_FILE_SIZE) {
+            setMessage("File too large. Maximum size is 10 MB.");
+            return;
+        }
+
+        const allowedTypes = [
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "text/plain"
+        ];
+
+        if (!allowedTypes.includes(file.type)) {
+            setMessage(
+                "Invalid file type. Only PDF, DOCX, and TXT files are allowed."
+            );
             return;
         }
 
         try {
             setLoading(true);
-            setMessage(
-                "Analyzing your resume..."
-            );
+            setMessage("Analyzing your resume...");
 
-            const formData =
-                new FormData();
+            const formData = new FormData();
+            formData.append("resume", file);
 
-            formData.append(
-                "resume",
-                file
-            );
+            const token = await getToken();
 
-            const token =
-                await getToken();
-
-            const response =
-                await api.post(
-                    "/profile/resume",
-                    formData,
-                    {
-                        headers: {
-                            Authorization:
-                                `Bearer ${token}`
-                        }
+            const response = await api.post(
+                "/profile/resume",
+                formData,
+                {
+                    headers: {
+                        Authorization: `Bearer ${token}`
                     }
-                );
-
-            setMessage(
-                "✓ Resume analyzed successfully!"
+                }
             );
 
-            if (onComplete) {
-                onComplete(
-                    response.data.profile
-                );
+            if (response.data.partial) {
+                setMessage("Resume saved, but AI analysis failed. You can edit your profile manually.");
+            } else {
+                setMessage("Resume analyzed successfully!");
+            }
+
+            if (onComplete && response.data.profile) {
+                onComplete(response.data.profile);
             }
         } catch (error) {
             console.error(error);
 
-            setMessage(
-                error.response?.data
-                    ?.message ||
+            const errData = error.response?.data;
+
+            if (errData?.partial) {
+                if (errData?.retryable) {
+                    setMessage("Resume saved, but AI analysis is temporarily unavailable. Please try again later.");
+                } else {
+                    setMessage("Resume saved, but AI analysis failed. You can edit your profile manually.");
+                }
+            } else {
+                setMessage(
+                    errData?.message ||
                     "Resume upload failed."
-            );
+                );
+            }
         } finally {
             setLoading(false);
         }
+    };
+
+    const getFileMessageClass = () => {
+        if (message.includes("successfully")) {
+            return "success";
+        }
+        if (
+            message.includes("failed") ||
+            message.includes("Error")
+        ) {
+            return "error";
+        }
+        if (
+            message.includes("complete") ||
+            message.includes("Analyzing")
+        ) {
+            return "warning";
+        }
+        return "";
     };
 
     return (
@@ -84,7 +118,7 @@ export default function ResumeUpload({
             <div className="upload-box">
 
                 <div className="upload-icon">
-                    📄
+                    <FileText size={44} />
                 </div>
 
                 <h2>
@@ -108,13 +142,13 @@ export default function ResumeUpload({
                 />
 
                 {file && (
-                    <p>
+                    <p className="file-name">
                         Selected:{" "}
                         <strong>
                             {file.name}
                         </strong>
                     </p>
-                )}
+                ) }
 
                 <button
                     className="btn"
@@ -127,10 +161,15 @@ export default function ResumeUpload({
                 </button>
 
                 {message && (
-                    <p className="upload-message">
+                    <p
+                        className={
+                            "upload-message " +
+                            getFileMessageClass()
+                        }
+                    >
                         {message}
                     </p>
-                )}
+                ) }
 
             </div>
 

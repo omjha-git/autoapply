@@ -1,101 +1,75 @@
 /**
- * Internshala adapter — search-link fallback.
+ * Internshala adapter — search-link fallback (compliant).
  *
- * Internshala does NOT provide a public REST API for
- * programmatic job/internship listings. Their site blocks
- * automated access (scraping, headless browsers, etc.).
+ * Internshala (internshala.com) does NOT publish a public REST API for
+ * programmatic internship listings, and its site actively blocks automated
+ * access (scraping / headless browsers / anti-bot controls).
  *
- * This adapter returns a single result linking to the
- * Internshala public search page pre-filled with the
- * caller's query and location. The user can click "Apply"
- * to browse real listings directly on Internshala.
+ * Per the project's honesty policy, this adapter does NOT pretend to be a
+ * live job feed. Instead it returns a SINGLE clearly-labeled card that links
+ * to Internshala's public search page, pre-filled with the caller's query
+ * and location. The user clicks "Apply" to browse real listings directly on
+ * Internshala.
  *
- * If Internshala publishes an official API or approved
- * data feed in the future, replace this body with a real
- * HTTP call to that endpoint.
+ * The returned object carries `isSearchLink: true` and
+ * `unavailableReason` so the frontend can render it distinctly from live
+ * jobs and never present it as a specific, scraped listing.
+ *
+ * If Internshala ever publishes an official API, replace this body with a
+ * real HTTP call to that endpoint.
  */
-const searchInternshala = async ({
-    query = "",
-    location = ""
-}) => {
 
-    // Build a public Internshala search URL.
-    // Their URL format: /internships/keywords-{query}/location-{location}
-    // Fall back to the bare search page when fields are empty.
-
-    let searchUrl = "https://internshala.com/internships";
-
-    const parts = [];
-
-    if (query.trim()) {
-        parts.push(
-            "keywords-" +
-            encodeURIComponent(
-                query.trim().replace(/\s+/g, "-").toLowerCase()
-            )
-        );
+const buildInternshalaUrl = (query, location) => {
+    var params = new URLSearchParams();
+    if (query && query.trim()) {
+        params.set("keyword", query.trim());
     }
-
-    if (location.trim()) {
-        parts.push(
-            "location-" +
-            encodeURIComponent(
-                location.trim().replace(/\s+/g, "-").toLowerCase()
-            )
-        );
+    if (location && location.trim()) {
+        params.set("location", location.trim());
     }
+    var qs = params.toString();
+    return "https://internshala.com/internships" + (qs ? "?" + qs : "");
+};
 
-    if (parts.length > 0) {
-        searchUrl += "/" + parts.join("/");
-    }
-
-    // Return a single normalized result so the UI
-    // shows an actionable card instead of nothing.
-    const label = [query, location]
-        .filter(Boolean)
-        .join(" in ") || "all categories";
+const searchInternshala = async ({ query = "", location = "" }) => {
+    const searchUrl = buildInternshalaUrl(query, location);
+    const label = [query, location].filter(Boolean).join(" in ") || "all categories";
 
     return [
         {
             externalId:
                 "internshala-search-" +
-                Buffer.from(searchUrl).toString("base64").slice(0, 32),
+                Buffer.from(searchUrl).toString("base64"),
 
-            title:
-                query
-                    ? `Internshala: "${query}" internships`
-                    : "Internshala internship listings",
+            title: query
+                ? `Internshala: "${query}" internships`
+                : "Internshala internship listings",
 
-            company:
-                "Internshala",
-
-            location:
-                location || "All India",
-
-            workMode:
-                "Unknown",
-
-            employmentType:
-                "Internship",
+            company: "Internshala",
+            location: location || "All India",
+            workMode: "Unknown",
+            employmentType: "Internship",
 
             description:
-                `Browse ${label} internships on Internshala. ` +
-                "Internshala does not provide a public API. " +
-                "Click Apply to search real listings on their platform.",
+                `Browse "${label}" internships on Internshala. ` +
+                `Internshala does not provide a public API and blocks ` +
+                `automated scraping, so this is a direct search link rather ` +
+                `than a live feed. Click "Apply" to view real, current ` +
+                `listings on Internshala.`,
 
             skills: [],
-
             salary: "",
-
             source: "internshala",
-
             sourceUrl: searchUrl,
-
             applyUrl: searchUrl,
-
-            postedDate: null
+            requiresAuth: false,
+            postedDate: null,
+            // IMPORTANT: marks this as a search link, NOT a scraped job.
+            isSearchLink: true,
+            unavailableReason:
+                "Internshala has no public API and blocks automated access; showing a search link."
         }
     ];
 };
 
-module.exports = searchInternshala;
+module.exports = searchInternshala;

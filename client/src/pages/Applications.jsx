@@ -8,24 +8,17 @@ import {
     generateCoverLetter
 } from "../services/api";
 
+import Layout from "../components/Layout";
+
+import {
+    Link
+} from "react-router-dom";
+
 export default function Applications() {
-
-    const [
-        applications,
-        setApplications
-    ] = useState([]);
-
-    // Track which application is currently generating
-    const [generatingId, setGeneratingId] =
-        useState(null);
-
-    // Track which application's letter is expanded
-    const [expandedId, setExpandedId] =
-        useState(null);
-
-    // Track error per application
-    const [errors, setErrors] =
-        useState({});
+    const [applications, setApplications] = useState([]);
+    const [generatingId, setGeneratingId] = useState(null);
+    const [expandedId, setExpandedId] = useState(null);
+    const [errors, setErrors] = useState({});
 
     useEffect(() => {
         load();
@@ -33,32 +26,18 @@ export default function Applications() {
 
     const load = async () => {
         try {
-            const data =
-                await getApplications();
-
-            setApplications(
-                data.applications || []
-            );
+            const data = await getApplications();
+            setApplications(data.applications || []);
         } catch (error) {
             console.error(error);
         }
     };
 
-
-    // =========================
-    // GENERATE COVER LETTER
-    // =========================
-
     const handleGenerate = async (applicationId) => {
-
         setGeneratingId(applicationId);
         setErrors((prev) => ({ ...prev, [applicationId]: "" }));
-
         try {
-
             const data = await generateCoverLetter(applicationId);
-
-            // Update the application in local state
             setApplications((prev) =>
                 prev.map((app) =>
                     app._id === applicationId
@@ -66,28 +45,18 @@ export default function Applications() {
                         : app
                 )
             );
-
-            // Auto-expand the new letter
             setExpandedId(applicationId);
-
         } catch (error) {
-
             setErrors((prev) => ({
                 ...prev,
                 [applicationId]:
                     error.response?.data?.message ||
                     "Failed to generate cover letter."
             }));
-
         } finally {
             setGeneratingId(null);
         }
     };
-
-
-    // =========================
-    // COPY TO CLIPBOARD
-    // =========================
 
     const handleCopy = (text) => {
         navigator.clipboard
@@ -96,199 +65,108 @@ export default function Applications() {
             .catch(() => alert("Could not copy. Please select the text manually."));
     };
 
-
     return (
-        <div className="app">
-
-            <aside className="sidebar">
-
-                <h2>
-                    AutoApply
-                </h2>
-
-
-                <a href="/dashboard">
-                    Dashboard
-                </a>
-
-
-                <a href="/jobs">
-                    Find Jobs
-                </a>
-
-
-                <a href="/profile">
-                    My Profile
-                </a>
-
-
-                <a href="/applications">
-                    Applications
-                </a>
-
-            </aside>
-
-            <main className="content">
-
-                <h1>
-                    Applications
-                </h1>
-
-                {applications.length === 0 ? (
-                    <div className="empty">
-                        No applications yet.
-                    </div>
-                ) : (
-                    <div className="applications">
-
-                        {applications.map(
-                            (application) => (
-
-                                <div
-                                    className="job-card"
-                                    key={
-                                        application._id
-                                    }
-                                    style={{ flexDirection: "column", gap: "12px" }}
-                                >
-
-                                    {/* ── Top row: title + status ── */}
-                                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-
-                                        <div>
-
-                                            <h2>
-                                                {
-                                                    application
-                                                        .job
-                                                        ?.title
-                                                }
-                                            </h2>
-
-                                            <h3>
-                                                {
-                                                    application
-                                                        .job
-                                                        ?.company
-                                                }
-                                            </h3>
-
-                                        </div>
-
-                                        <span className="status">
-                                            {
-                                                application
-                                                    .status
-                                            }
-                                        </span>
-
+        <Layout
+            title="Applications"
+            subtitle="Track your saved jobs and applications."
+        >
+            {applications.length === 0 ? (
+                <div className="empty">
+                    <h3>No applications yet.</h3>
+                    <p>
+                        Jobs you save will appear
+                        here. Start by searching
+                        for jobs to apply.
+                    </p>
+                    <Link
+                        to="/jobs"
+                        className="btn"
+                    >
+                        Find Jobs
+                    </Link>
+                </div>
+            ) : (
+                <div className="applications">
+                        {applications.map((application) => (
+                            <div
+                                className="application-row"
+                                key={application._id}
+                            >
+                                <div className="job-header">
+                                    <div>
+                                        <p className="app-title">
+                                            {application.job?.title}
+                                        </p>
+                                        <p className="app-company">
+                                            {application.job?.company}
+                                        </p>
                                     </div>
+                                    <span
+                                        className={
+                                            "status " +
+                                            (application.status || "")
+                                                .toLowerCase()
+                                        }
+                                    >
+                                        {application.status}
+                                    </span>
+                                </div>
 
+                                <div className="job-actions">
+                                    <button
+                                        className="btn"
+                                        onClick={() => handleGenerate(application._id)}
+                                        disabled={generatingId === application._id}
+                                    >
+                                        {generatingId === application._id
+                                            ? "Generating..."
+                                            : application.coverLetter
+                                                ? "Regenerate Letter"
+                                                : "Generate Cover Letter"}
+                                    </button>
 
-                                    {/* ── Cover letter action row ── */}
-                                    <div className="job-actions">
-
+                                    {application.coverLetter && (
                                         <button
                                             className="btn secondary"
                                             onClick={() =>
-                                                handleGenerate(
-                                                    application._id
+                                                setExpandedId(
+                                                    expandedId === application._id
+                                                        ? null
+                                                        : application._id
                                                 )
                                             }
-                                            disabled={
-                                                generatingId ===
-                                                application._id
-                                            }
                                         >
-                                            {generatingId === application._id
-                                                ? "Generating…"
-                                                : application.coverLetter
-                                                    ? "Regenerate Letter"
-                                                    : "Generate Cover Letter"}
+                                            {expandedId === application._id
+                                                ? "Hide Letter"
+                                                : "View Letter"}
                                         </button>
-
-                                        {application.coverLetter && (
-                                            <button
-                                                className="btn secondary"
-                                                onClick={() =>
-                                                    setExpandedId(
-                                                        expandedId ===
-                                                            application._id
-                                                            ? null
-                                                            : application._id
-                                                    )
-                                                }
-                                            >
-                                                {expandedId === application._id
-                                                    ? "Hide Letter"
-                                                    : "View Letter"}
-                                            </button>
-                                        )}
-
-                                    </div>
-
-
-                                    {/* ── Error message ── */}
-                                    {errors[application._id] && (
-                                        <p style={{ color: "#dc2626", margin: 0, fontSize: "14px" }}>
-                                            {errors[application._id]}
-                                        </p>
                                     )}
+                                </div>
 
+                                {errors[application._id] && (
+                                    <p className="error-msg">
+                                        {errors[application._id]}
+                                    </p>
+                                )}
 
-                                    {/* ── Expanded cover letter ── */}
-                                    {expandedId === application._id &&
-                                        application.coverLetter && (
-
-                                        <div
-                                            style={{
-                                                background: "#f9fafb",
-                                                border: "1px solid #e4e4e7",
-                                                borderRadius: "10px",
-                                                padding: "18px",
-                                                position: "relative"
-                                            }}
-                                        >
+                                {expandedId === application._id &&
+                                    application.coverLetter && (
+                                        <div className="panel">
                                             <button
                                                 className="btn secondary"
-                                                style={{ marginBottom: "12px", fontSize: "13px", padding: "7px 14px" }}
-                                                onClick={() =>
-                                                    handleCopy(
-                                                        application.coverLetter
-                                                    )
-                                                }
+                                                onClick={() => handleCopy(application.coverLetter)}
                                             >
                                                 Copy
                                             </button>
-
-                                            <pre
-                                                style={{
-                                                    whiteSpace: "pre-wrap",
-                                                    wordBreak: "break-word",
-                                                    fontFamily: "inherit",
-                                                    fontSize: "14px",
-                                                    lineHeight: "1.7",
-                                                    color: "#374151",
-                                                    margin: 0
-                                                }}
-                                            >
+                                            <pre className="cover-letter">
                                                 {application.coverLetter}
                                             </pre>
-
                                         </div>
-
                                     )}
-
-                                </div>
-
-                            )
-                        )}
-
+                            </div>
+                        ))}
                     </div>
                 )}
-
-            </main>
-
-        </div>
+        </Layout>
     );
 }

@@ -1,123 +1,131 @@
 import {
+    useEffect,
+    useState
+} from "react";
+
+import {
     Link
 } from "react-router-dom";
 
 import {
-    UserButton
-} from "@clerk/react";
+    getDashboardStats
+} from "../services/api";
+
+import Layout from "../components/Layout";
+import StatCard from "../components/StatCard";
+
+import {
+    Briefcase,
+    FileText,
+    CalendarDays,
+    TrendingUp
+} from "lucide-react";
 
 export default function Dashboard() {
-    return (
-        <div className="app">
+    const [stats, setStats] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
 
-            <aside className="sidebar">
+    useEffect(() => {
+        const loadStats = async () => {
+            try {
+                const data = await getDashboardStats();
+                setStats(data.stats);
+            } catch (err) {
+                console.error("Failed to load dashboard stats:", err);
+                setError("Failed to load dashboard stats.");
+            } finally {
+                setLoading(false);
+            }
+        };
 
-                <h2>
-                    AutoApply
-                </h2>
+        loadStats();
+    }, []);
 
-                <Link to="/dashboard">
-                    Dashboard
-                </Link>
+    const statCards = [
+        {
+            label: "Jobs Found",
+            value: stats?.jobsFound || 0,
+            icon: <Briefcase size={18} />,
+            trend: "neutral"
+        },
+        {
+            label: "Applications",
+            value: stats?.applications || 0,
+            icon: <FileText size={18} />,
+            trend: "neutral"
+        },
+        {
+            label: "Interviews",
+            value: stats?.interviews || 0,
+            icon: <CalendarDays size={18} />,
+            trend: "neutral"
+        },
+        {
+            label: "Profile Strength",
+            value: typeof stats?.profileStrength === "number"
+                ? stats.profileStrength + "%"
+                : "0%",
+            icon: <TrendingUp size={18} />,
+            trend: "neutral"
+        }
+    ];
 
-                <Link to="/jobs">
-                    Find Jobs
-                </Link>
-
-                <Link to="/profile">
-                    My Profile
-                </Link>
-
-                <Link to="/applications">
-                    Applications
-                </Link>
-
-            </aside>
-
-            <main className="content">
-
-                <header className="topbar">
-
-                    <div>
-                        <h1>
-                            Dashboard
-                        </h1>
-
-                        <p>
-                            Your job search command center.
-                        </p>
-                    </div>
-
-                    <UserButton />
-
-                </header>
-
-                <section className="stats">
-
-                    <div className="stat">
-                        <span>
-                            Jobs Found
-                        </span>
-
-                        <strong>
-                            0
-                        </strong>
-                    </div>
-
-                    <div className="stat">
-                        <span>
-                            Applications
-                        </span>
-
-                        <strong>
-                            0
-                        </strong>
-                    </div>
-
-                    <div className="stat">
-                        <span>
-                            Interviews
-                        </span>
-
-                        <strong>
-                            0
-                        </strong>
-                    </div>
-
-                    <div className="stat">
-                        <span>
-                            Profile
-                        </span>
-
-                        <strong>
-                            0%
-                        </strong>
-                    </div>
-
-                </section>
-
-                <section className="panel">
-
-                    <h2>
-                        Find your next opportunity
-                    </h2>
-
-                    <p>
-                        Search jobs across supported
-                        job platforms and ATS systems.
+        return (
+        <Layout>
+            <div className="page-header">
+                <div>
+                    <h1 className="page-title">
+                        Welcome back
+                    </h1>
+                    <p className="page-subtitle">
+                        Your job search command center.
                     </p>
+                </div>
 
-                    <Link
-                        className="btn"
-                        to="/jobs"
-                    >
-                        Search Jobs
-                    </Link>
+                <Link
+                    className="btn"
+                    to="/jobs"
+                >
+                    Search Jobs
+                </Link>
+            </div>
 
-                </section>
+            <section className="stats">
+                {loading ? (
+                    <p className="loading-spinner">
+                        Loading dashboard stats...
+                    </p>
+                ) : error ? (
+                    <p className="error-msg">{error}</p>
+                ) : (
+                    statCards.map((stat) => (
+                        <StatCard
+                            key={stat.label}
+                            label={stat.label}
+                            value={stat.value}
+                            icon={stat.icon}
+                            trend={stat.trend}
+                        />
+                    ))
+                )}
+            </section>
 
-            </main>
+            <section className="panel">
+                <h2>Find your next opportunity</h2>
 
-        </div>
+                <p>
+                    Search jobs across supported
+                    job platforms and ATS systems.
+                </p>
+
+                <Link
+                    className="btn"
+                    to="/jobs"
+                >
+                    Search Jobs
+                </Link>
+            </section>
+        </Layout>
     );
 }

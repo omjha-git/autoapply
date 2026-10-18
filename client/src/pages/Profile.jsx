@@ -10,6 +10,8 @@ import {
 
 import ResumeUpload from "../components/ResumeUpload";
 
+import Layout from "../components/Layout";
+
 export default function Profile() {
     const [profile, setProfile] =
         useState(null);
@@ -103,68 +105,39 @@ export default function Profile() {
 
     if (!profile) {
         return (
-            <div className="content">
-                Loading profile...
-            </div>
+            <Layout title="Profile" subtitle="Build and manage your profile.">
+                <p>Loading profile...</p>
+            </Layout>
         );
     }
 
     return (
-        <div className="app">
+        <Layout
+            title="Build Your Profile"
+            subtitle="Upload your resume and AutoApply will automatically extract your information."
+        >
 
-            <aside className="sidebar">
+                                            <div className="profile-grid">
 
-                <h2>
-                    AutoApply
-                </h2>
-
-                <a href="/dashboard">
-                    Dashboard
-                </a>
-
-                <a href="/jobs">
-                    Find Jobs
-                </a>
-
-                <a href="/profile">
-                    My Profile
-                </a>
-
-                <a href="/applications">
-                    Applications
-                </a>
-
-            </aside>
-
-            <main className="content">
-
-                <h1>
-                    Build Your Profile
-                </h1>
-
-                <p>
-                    Upload your resume and
-                    AutoApply will automatically
-                    extract your information.
-                </p>
-
-                <ResumeUpload
-                    onComplete={
-                        handleResumeComplete
-                    }
-                />
+                        <ResumeUpload
+                            onComplete={
+                                handleResumeComplete
+                            }
+                        />
 
                 <div className="form">
 
-                    <h2>
+                    <h3>
                         Extracted Profile
-                    </h2>
+                    </h3>
 
-                    <label>
+                    <div className="form-field">
+                            <label className="form-label">
                         Full Name
                     </label>
 
                     <input
+                                className="form-input"
                         value={
                             profile.fullName ||
                             ""
@@ -176,12 +149,15 @@ export default function Profile() {
                             )
                         }
                     />
+                        </div>
 
-                    <label>
+                    <div className="form-field">
+                            <label className="form-label">
                         Email
                     </label>
 
                     <input
+                                className="form-input"
                         value={
                             profile.email ||
                             ""
@@ -193,12 +169,15 @@ export default function Profile() {
                             )
                         }
                     />
+                        </div>
 
-                    <label>
+                    <div className="form-field">
+                            <label className="form-label">
                         Phone
                     </label>
 
                     <input
+                                className="form-input"
                         value={
                             profile.phone ||
                             ""
@@ -210,12 +189,15 @@ export default function Profile() {
                             )
                         }
                     />
+                        </div>
 
-                    <label>
+                    <div className="form-field">
+                            <label className="form-label">
                         Location
                     </label>
 
                     <input
+                                className="form-input"
                         value={
                             profile.location ||
                             ""
@@ -227,12 +209,15 @@ export default function Profile() {
                             )
                         }
                     />
+                        </div>
 
-                    <label>
+                    <div className="form-field">
+                            <label className="form-label">
                         Headline
                     </label>
 
                     <input
+                                className="form-input"
                         value={
                             profile.headline ||
                             ""
@@ -244,12 +229,15 @@ export default function Profile() {
                             )
                         }
                     />
+                        </div>
 
-                    <label>
+                    <div className="form-field">
+                            <label className="form-label">
                         Skills
                     </label>
 
                     <input
+                                className="form-input"
                         value={skills}
                         onChange={(e) =>
                             setSkills(
@@ -257,12 +245,15 @@ export default function Profile() {
                             )
                         }
                     />
+                        </div>
 
-                    <label>
+                    <div className="form-field form-field-full">
+                            <label className="form-label">
                         Summary
                     </label>
 
                     <textarea
+                                className="form-input form-textarea"
                         rows="6"
                         value={
                             profile.summary ||
@@ -275,6 +266,7 @@ export default function Profile() {
                             )
                         }
                     />
+                        </div>
 
                     <button
                         className="btn"
@@ -285,25 +277,23 @@ export default function Profile() {
 
                 </div>
 
+                </div>
+
                 {profile.preferences
                     ?.roles?.length >
                     0 && (
                     <div className="panel">
 
-                        <h2>
+                        <h3>
                             Recommended Roles
-                        </h2>
+                        </h3>
 
                         <div>
                             {profile.preferences.roles.map(
                                 (role) => (
                                     <span
-                                        className="source"
+                                        className="skill-tag"
                                         key={role}
-                                        style={{
-                                            marginRight:
-                                                "8px"
-                                        }}
                                     >
                                         {role}
                                     </span>
@@ -314,8 +304,6 @@ export default function Profile() {
                     </div>
                 )}
 
-            </main>
-
-        </div>
+        </Layout>
     );
 }

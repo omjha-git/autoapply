@@ -7,6 +7,19 @@ import {
     createApplication
 } from "../services/api";
 
+import Layout from "../components/Layout";
+
+import {
+    Link
+} from "react-router-dom";
+
+import {
+    MapPin,
+    Briefcase,
+    Clock,
+    AlertCircle
+} from "lucide-react";
+
 
 export default function Jobs() {
 
@@ -64,10 +77,32 @@ export default function Jobs() {
 
             setJobs([]);
 
-            setError(
-                error.response?.data?.message ||
-                "Unable to search jobs."
-            );
+            // Distinguish failure modes so the UI can surface a precise
+            // state (auth / server / network-CORS) instead of a generic
+            // "nothing happened" message.
+            if (!error.response) {
+                // No response => network failure or CORS blocking the
+                // request (browsers hide detail on cross-origin failures).
+                setError(
+                    "Network/CORS error \u2014 could not reach the AutoApply API. " +
+                    "Make sure the server is running and CLIENT_URL permits " +
+                    "this browser origin (http://localhost:5173 in dev)."
+                );
+            } else if (error.response.status === 401) {
+                setError(
+                    "Authentication required \u2014 please sign in to search jobs."
+                );
+            } else if (error.response.status >= 500) {
+                setError(
+                    error.response?.data?.message ||
+                    "Server error while searching jobs. Please try again."
+                );
+            } else {
+                setError(
+                    error.response?.data?.message ||
+                    "Unable to search jobs."
+                );
+            }
 
         } finally {
 
@@ -215,60 +250,10 @@ export default function Jobs() {
 
 
     return (
-
-        <div className="app">
-
-
-            {/* =========================
-                SIDEBAR
-            ========================= */}
-
-            <aside className="sidebar">
-
-                <h2>
-                    AutoApply
-                </h2>
-
-
-                <a href="/dashboard">
-                    Dashboard
-                </a>
-
-
-                <a href="/jobs">
-                    Find Jobs
-                </a>
-
-
-                <a href="/profile">
-                    My Profile
-                </a>
-
-
-                <a href="/applications">
-                    Applications
-                </a>
-
-            </aside>
-
-
-            {/* =========================
-                MAIN CONTENT
-            ========================= */}
-
-            <main className="content">
-
-
-                <h1>
-                    Find Jobs
-                </h1>
-
-
-                <p>
-                    Search opportunities based on
-                    your skills, role and preferred
-                    location.
-                </p>
+        <Layout
+            title="Find Jobs"
+            subtitle="Search opportunities based on your skills, role and preferred location."
+        >
 
 
                 {/* =========================
@@ -347,15 +332,19 @@ export default function Jobs() {
                     searched &&
                     jobs.length > 0 && (
 
-                        <div className="job-count">
+                        <div className="results-header">
 
-                            Found{" "}
+                            <h2 className="results-heading">
 
-                            <strong>
-                                {jobs.length}
-                            </strong>{" "}
+                                Found{" "}
 
-                            jobs
+                                <strong>
+                                    {jobs.length}
+                                </strong>{" "}
+
+                                jobs
+
+                            </h2>
 
                         </div>
 
@@ -389,10 +378,10 @@ export default function Jobs() {
                     {loading && (
 
                         <div className="empty">
-
-                            Searching available
-                            opportunities...
-
+                            <p className="loading-spinner">
+                                Searching available
+                                opportunities...
+                            </p>
                         </div>
 
                     )}
@@ -406,14 +395,22 @@ export default function Jobs() {
                         jobs.length === 0 && (
 
                             <div className="empty">
-
-                                No jobs found.
-
-                                <br />
-
-                                Try another job title
-                                or location.
-
+                                <h3>
+                                    No jobs found
+                                </h3>
+                                <p>
+                                    We could not find any jobs
+                                    matching your search criteria.
+                                </p>
+                                <button
+                                    className="btn secondary"
+                                    onClick={() => {
+                                        setQuery("");
+                                        setLocation("");
+                                    }}
+                                >
+                                    Clear Search
+                                </button>
                             </div>
 
                         )}
@@ -441,7 +438,7 @@ export default function Jobs() {
                             return (
 
                                 <div
-                                    className="job-card"
+                                    className={"job-card" + (job.isSearchLink ? " search-link-card" : "")}
                                     key={
                                         job._id ||
                                         job.externalId
@@ -463,46 +460,51 @@ export default function Jobs() {
 
                                                 {job.source ||
                                                     "Job Board"}
+                                                {job.isSearchLink && (
+                                                    <span
+                                                        className="search-link-badge"
+                                                        title="Search link — not a live listing"
+                                                    >
+                                                        Search link
+                                                    </span>
+                                                )}
 
                                             </span>
 
 
-                                            <span className="match-score">
-
-                                                {score}%
-                                                Match
-
-                                            </span>
+                                            {job.isSearchLink ? (
+                                                <span className="match-score match-na">
+                                                    N/A
+                                                </span>
+                                            ) : (
+                                                <span className={"match-score " + (score >= 80 ? "high" : score >= 50 ? "medium" : "low")}>
+                                                    {score}%
+                                                    Match
+                                                </span>
+                                            )}
 
                                         </div>
 
 
                                         {/* TITLE */}
 
-                                        <h2>
-
-                                            {job.title ||
-                                                "Unknown Position"}
-
-                                        </h2>
+                                        <h3 className="job-title">
+                                            {job.title || "Unknown Position"}
+                                        </h3>
 
 
                                         {/* COMPANY */}
 
-                                        <h3>
-
-                                            {job.company ||
-                                                "Unknown Company"}
-
-                                        </h3>
+                                        <p className="job-company">
+                                            {job.company || "Unknown Company"}
+                                        </p>
 
 
                                         {/* LOCATION */}
 
                                         <p>
 
-                                            📍{" "}
-
+                                            <MapPin size={16} />
                                             {job.location ||
                                                 "Location not specified"}
 
@@ -517,8 +519,7 @@ export default function Jobs() {
 
                                                 <p>
 
-                                                    💼{" "}
-
+                                                    <Briefcase size={14} />
                                                     {
                                                         job.workMode
                                                     }
@@ -536,8 +537,7 @@ export default function Jobs() {
 
                                                 <p>
 
-                                                    🕐{" "}
-
+                                                    <Clock size={14} />
                                                     {
                                                         job.employmentType
                                                     }
@@ -558,7 +558,15 @@ export default function Jobs() {
                                         </p>
 
 
-                                        {/* DESCRIPTION */}
+                                    {job.isSearchLink && job.unavailableReason && (
+                                                <p className="unavailable-note">
+                                                    <AlertCircle size={14} />
+                                                    {job.unavailableReason}
+                                                </p>
+                                            )}
+
+
+                                            {/* DESCRIPTION */}
 
                                         {description && (
 
@@ -587,7 +595,7 @@ export default function Jobs() {
                                             job.skills.length >
                                                 0 && (
 
-                                                <div className="skills">
+                                                <div className="job-skills">
 
                                                     {job.skills
                                                         .slice(
@@ -628,18 +636,20 @@ export default function Jobs() {
                                     <div className="job-actions">
 
 
-                                        <button
-                                            className="btn secondary"
-                                            onClick={() =>
-                                                saveJob(
-                                                    job._id
-                                                )
-                                            }
-                                        >
+                                        {!job.isSearchLink && (
+                                            <button
+                                                className="btn secondary"
+                                                onClick={() =>
+                                                    saveJob(
+                                                        job._id
+                                                    )
+                                                }
+                                            >
 
-                                            Save
+                                                Save
 
-                                        </button>
+                                            </button>
+                                        )}
 
 
                                         {job.applyUrl && (
@@ -653,7 +663,9 @@ export default function Jobs() {
                                                 rel="noreferrer"
                                             >
 
-                                                Apply
+                                                {job.isSearchLink
+                                                    ? "Browse results"
+                                                    : "Apply"}
 
                                             </a>
 
@@ -670,9 +682,7 @@ export default function Jobs() {
 
                 </div>
 
-            </main>
-
-        </div>
+        </Layout>
 
     );
 

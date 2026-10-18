@@ -7,6 +7,7 @@ const requireAuth = require("../middleware/authMiddleware");
 
 const {
     getProfile,
+    getDashboardStats,
     updateProfile
 } = require("../controllers/profileController");
 
@@ -71,6 +72,12 @@ const upload = multer({
 // Profile
 router.get("/", requireAuth, getProfile);
 
+router.get(
+    "/dashboard-stats",
+    requireAuth,
+    getDashboardStats
+);
+
 router.put(
     "/",
     requireAuth,
@@ -84,5 +91,48 @@ router.post(
     upload.single("resume"),
     uploadResume
 );
+
+// Multer error handler — catches file-size limit errors (LIMIT_FILE_SIZE),
+// invalid file types from the fileFilter, and too-many-files errors.
+// Without this, multer throws its own error object that bypasses the
+// controller try/catch and produces an unhelpful HTML 500 page.
+router.use((error, req, res, next) => {
+    if (error instanceof multer.MulterError) {
+        if (error.code === "LIMIT_FILE_SIZE") {
+            return res.status(400).json({
+                success: false,
+                message: "File too large. Maximum size is 10 MB."
+            });
+        }
+        if (error.code === "LIMIT_FILE_COUNT") {
+            return res.status(400).json({
+                success: false,
+                message: "Too many files."
+            });
+        }
+        if (error.code === "LIMIT_UNEXPECTED_FILE") {
+            return res.status(400).json({
+                success: false,
+                message: "Unexpected file field."
+            });
+        }
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+
+    if (
+        error.message &&
+        error.message.includes("Only PDF")
+    ) {
+        return res.status(400).json({
+            success: false,
+            message: error.message
+        });
+    }
+
+    next(error);
+});
 
 module.exports = router;

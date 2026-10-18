@@ -57,6 +57,28 @@ export const getProfile = async () => {
     return response.data;
 };
 
+/**
+ * Fetch dashboard statistics for the authenticated user.
+ * Returns real counts from the Application and Job models.
+ */
+export const getDashboardStats = async () => {
+    const response = await api.get("/profile/dashboard-stats");
+    return response.data;
+};
+
+/**
+ * Upload a resume file.
+ * The FormData must contain a "resume" field.
+ */
+export const uploadResume = async (formData) => {
+    const response = await api.post("/profile/resume", formData, {
+        headers: {
+            "Content-Type": "multipart/form-data"
+        }
+    });
+    return response.data;
+};
+
 export const updateProfile = async (data) => {
     const response = await api.put(
         "/profile",

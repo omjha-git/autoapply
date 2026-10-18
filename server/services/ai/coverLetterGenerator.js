@@ -1,9 +1,27 @@
 const { GoogleGenAI } = require("@google/genai");
+const { describeGeminiError } = require("./geminiError");
 
-// Reuse the same client pattern as resumeExtractor.js
-const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY
-});
+// Reuse the same client pattern as resumeExtractor.js.
+// Guard: if no API key is configured, fail fast with a clear
+// error instead of constructing a client with an empty key.
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GEMINI_MODEL =
+    process.env.GEMINI_MODEL ||
+    "gemini-3.6-flash";
+
+if (!GEMINI_API_KEY || !GEMINI_API_KEY.trim()) {
+    console.warn(
+        "GEMINI_API_KEY is not set. AI cover-letter generation is disabled."
+    );
+}
+
+let ai = null;
+
+if (GEMINI_API_KEY && GEMINI_API_KEY.trim()) {
+    ai = new GoogleGenAI({
+        apiKey: GEMINI_API_KEY
+    });
+}
 
 /**
  * Build a compact, structured summary of the user's
@@ -110,6 +128,12 @@ const generateCoverLetter = async (profile, job) => {
 
     // ── Guards ──────────────────────────────────────────
 
+    if (!ai) {
+        throw new Error(
+            "Gemini AI key is not configured. Set GEMINI_API_KEY in server/.env."
+        );
+    }
+
     if (!profile) {
         throw new Error(
             "Profile not found. Please upload your resume first."
@@ -163,11 +187,9 @@ ${jobDescription ? `Description:\n${jobDescription}` : ""}
 Write a professional cover letter for this candidate applying to this role.
 `.trim();
 
-    // ── Call Gemini (with retry for transient 503) ───────
+        // ── Call Gemini: fail-fast on 404/401/403, retry transient 429/5xx ──
 
-    const MODEL =
-        process.env.GEMINI_MODEL ||
-        "gemini-3.5-flash";
+        const MODEL = GEMINI_MODEL;
 
     const MAX_RETRIES = 3;
     const RETRY_DELAY_MS = 2000;
@@ -191,14 +213,30 @@ Write a professional cover letter for this candidate applying to this role.
 
             lastError = error;
 
-            const is503 =
-                error.message?.includes("503") ||
-                error.message?.includes("UNAVAILABLE") ||
-                error.message?.includes("high demand");
+            const classified = describeGeminiError(
+                error,
+                MODEL,
+                "cover letter generation"
+            );
 
-            if (is503 && attempt < MAX_RETRIES) {
+            // Model and auth errors are configuration problems that will
+            // NOT be fixed by retrying — fail fast with a distinct message.
+            if (
+                classified.status === 404 ||
+                classified.status === 401 ||
+                classified.status === 403
+            ) {
+                console.error(
+                    "Gemini cover letter error:",
+                    error.message
+                );
+                throw new Error(classified.message);
+            }
+
+            // Transient errors (429 quota, 502/503/504) may succeed on retry.
+            if (classified.retryable && attempt < MAX_RETRIES) {
                 console.warn(
-                    `Gemini 503 on attempt ${attempt}/${MAX_RETRIES}, retrying in ${RETRY_DELAY_MS}ms...`
+                    `Gemini ${classified.status} on attempt ${attempt}/${MAX_RETRIES}, retrying in ${RETRY_DELAY_MS}ms...`
                 );
 
                 await new Promise((resolve) =>
@@ -208,15 +246,14 @@ Write a professional cover letter for this candidate applying to this role.
                 continue;
             }
 
-            // Non-retriable error or last attempt
+            // Non-retriable error or last attempt: surface the distinct
+            // classification message.
             console.error(
                 "Gemini cover letter error:",
                 error.message
             );
 
-            throw new Error(
-                "AI generation failed. Please try again."
-            );
+            throw new Error(classified.message);
         }
     }
 

@@ -4,7 +4,8 @@
   "description": "",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "pretest": "node scripts/build-fixtures.js",
+    "test": "node --test",
     "dev": "nodemon server.js",
     "start": "node server.js"
   },
@@ -26,5 +27,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.14"
+  },
+  "optionalDependencies": {
+    "selenium-webdriver": "^4.15.0"
   }
 }

@@ -1,21 +1,8 @@
-const generateAnswer = async ({
-    question,
-    profile,
-    job
-}) => {
-    /*
-      Connect your preferred LLM here.
-
-      The function intentionally receives structured
-      profile + job information so generated answers
-      can be grounded in the user's actual information.
-    */
-
-    return `I am interested in this opportunity because it aligns with my skills and experience in ${(
-        profile?.skills || []
-    ).slice(0, 5).join(", ")}.`;
-};
-
-module.exports = {
-    generateAnswer
-};
+/**
+ * DEPRECATED: This directory is kept for backward compatibility.
+ *
+ * The canonical implementation now lives in `../services/ai/`.
+ * This file simply re-exports it so any external reference to
+ * `require("../ai/answerGenerator")` continues to work.
+ */
+module.exports = require("../services/ai/answerGenerator");

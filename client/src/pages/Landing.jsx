@@ -11,7 +11,7 @@ export default function Landing() {
 
             <nav className="navbar">
 
-                <div className="logo">
+                <div className="navbar-brand">
                     AutoApply
                 </div>
 

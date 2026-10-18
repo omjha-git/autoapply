@@ -1,438 +1,246 @@
-const normalize = (value = "") => {
-    return value
-        .toString()
-        .toLowerCase()
-        .replace(/[^a-z0-9+#.]/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
+/**
+ * matcher.js
+ *
+ * Deterministic, explainable job-resume matching — NO AI / API keys.
+ *
+ * Reads from:
+ *   - profile.resumeText            (saved plain-text resume)
+ *   - profile.skills / .keywords    (parsed or manually entered)
+ *   - profile.preferences.roles     (preferred roles)
+ *   - job.title + job.description + job.skills
+ *
+ * All skill detection goes through skillsDb so matching is canonical and
+ * case-insensitive, and repeated keywords are de-duplicated (never rewarded).
+ *
+ * Output per job:
+ *   {
+ *     matchPercentage: 0-100,
+ *     matchedSkills: [...],
+ *     missingSkills: [...],
+ *     explanation: "...",
+ *     components: { skills: 0-100, role: 0-100, description: 0-100 }
+ *   }
+ */
+
+const {
+    extractSkillsFromText,
+    dedupeSkills,
+    canonicalizeSkill,
+    normalizeToken
+} = require("../skillsDb");
+
+// Weighting for the composite score.
+const WEIGHTS = { skills: 0.5, role: 0.3, description: 0.2 };
+
+/**
+ * Build the canonical, de-duplicated skill set for the user.
+ * Combines explicitly-saved skills/keywords with skills extracted from the
+ * saved resume text (so matching works even without AI extraction).
+ */
+const getUserSkills = (profile) => {
+    if (!profile) return [];
+    const saved = Array.isArray(profile.skills) ? profile.skills : [];
+    const keywords = Array.isArray(profile.keywords) ? profile.keywords : [];
+    const fromText = extractSkillsFromText(profile.resumeText || "");
+    return dedupeSkills([...saved, ...keywords, ...fromText]);
 };
 
-// ==========================================
-// PROFILE SKILLS
-// ==========================================
+/**
+ * Build the set of skills the job is asking for:
+ *   1. adapter-supplied job.skills (if any)
+ *   2. skills detected in the job title + description
+ */
+const getJobSkills = (job) => {
+    if (!job) return [];
+    const supplied = Array.isArray(job.skills) ? job.skills.filter(Boolean) : [];
+    const fromText = extractSkillsFromText(
+        `${job.title || ""} ${job.description || ""}`
+    );
+    return dedupeSkills([...supplied, ...fromText]);
+};
 
-const getProfileSkills = (profile) => {
-    if (!profile) {
-        return [];
-    }
+/** Case-insensitive substring match (normalized). */
+const termInText = (term, text) => {
+    if (!term || !text) return false;
+    const a = normalizeToken(term);
+    const b = normalizeToken(text);
+    return a ? b.includes(a) : false;
+};
 
-    const skills = Array.isArray(profile.skills)
-        ? profile.skills
+/**
+ * Role relevance (0-100): how well the user's preferred roles / title-relevant
+ * skills match the job title.
+ */
+const getRoleScore = (profile, job) => {
+    const title = job && job.title ? job.title : "";
+    if (!title) return 0;
+
+    const roles = Array.isArray(profile?.preferences?.roles)
+        ? profile.preferences.roles
         : [];
+    const userSkills = getUserSkills(profile);
+    let best = 0;
 
-    const keywords = Array.isArray(profile.keywords)
-        ? profile.keywords
-        : [];
-
-    return [
-        ...skills,
-        ...keywords
-    ]
-        .map(normalize)
-        .filter(Boolean);
-};
-
-// ==========================================
-// PROFILE ROLES
-// ==========================================
-
-const getProfileRoles = (profile) => {
-    if (!profile) {
-        return [];
-    }
-
-    const roles =
-        Array.isArray(profile.preferences?.roles)
-            ? profile.preferences.roles
-            : [];
-
-    return roles
-        .map(normalize)
-        .filter(Boolean);
-};
-
-// ==========================================
-// CHECK TEXT MATCH
-// ==========================================
-
-const textMatches = (
-    keyword,
-    text
-) => {
-    const a = normalize(keyword);
-    const b = normalize(text);
-
-    if (!a || !b) {
-        return false;
-    }
-
-    // Exact phrase
-    if (b.includes(a)) {
-        return true;
-    }
-
-    // Handle things like:
-    // React.js -> React
-    // Node.js -> Node
-    // JavaScript -> javascript
-
-    const words = a
-        .split(" ")
-        .filter(
-            word => word.length >= 2
-        );
-
-    if (words.length === 0) {
-        return false;
-    }
-
-    let matched = 0;
-
-    for (const word of words) {
-        if (b.includes(word)) {
-            matched++;
+    for (const role of roles) {
+        const r = normalizeToken(role);
+        if (!r) continue;
+        const titleNorm = normalizeToken(title);
+        if (titleNorm.includes(r)) {
+            best = Math.max(best, 100);
+            break;
+        }
+        const words = r.split(/\s+/).filter((w) => w.length > 2);
+        if (words.length) {
+            const hit = words.filter((w) => titleNorm.includes(w)).length;
+            best = Math.max(best, (hit / words.length) * 100);
         }
     }
 
-    return (
-        matched / words.length >= 0.5
-    );
+    const titleLower = normalizeToken(title);
+    const techHits = userSkills.filter((s) =>
+        normalizeToken(s)
+            .split(/\s+/)
+            .some((w) => w.length > 2 && titleLower.includes(w))
+    ).length;
+    if (userSkills.length) {
+        best = Math.max(best, (techHits / userSkills.length) * 100);
+    }
+
+    return best;
+};
+/**
+ * Skills component (0-100): fraction of the JOB's required skills the user
+ * actually has. Returns { score, matched, missing }.
+ */
+const getSkillComponent = (userSkills, jobSkills) => {
+    if (!jobSkills.length) {
+        return { score: 0, matched: [], missing: [] };
+    }
+    const matched = [];
+    const missing = [];
+    for (const skill of jobSkills) {
+        const canon = canonicalizeSkill(skill);
+        const has = userSkills.some(
+            (u) => canonicalizeSkill(u) === canon || termInText(u, canon)
+        );
+        if (has) matched.push(skill);
+        else missing.push(skill);
+    }
+    const score = (matched.length / jobSkills.length) * 100;
+    return { score, matched, missing };
 };
 
-// ==========================================
-// CALCULATE MATCH
-// ==========================================
-
-const calculateMatchScore = (
-    profile,
-    job
-) => {
-
+/**
+ * Composite match score + explanation.
+ */
+const calculateMatch = (profile, job) => {
     if (!profile || !job) {
-        return 0;
+        return {
+            matchPercentage: 0,
+            matchedSkills: [],
+            missingSkills: [],
+            explanation:
+                "No resume on file. Upload your resume to see a match score.",
+            components: { skills: 0, role: 0, description: 0 }
+        };
     }
 
-    const skills =
-        getProfileSkills(profile);
+    const resumeText = profile.resumeText || "";
+    const hasResume = typeof resumeText === "string" && resumeText.trim().length > 0;
 
-    const roles =
-        getProfileRoles(profile);
-
-    const resumeText =
-        normalize(
-            profile.resumeText || ""
-        );
-
-    const title =
-        normalize(
-            job.title || ""
-        );
-
-    const description =
-        normalize(
-            job.description || ""
-        );
-
-    const completeJobText =
-        `${title} ${description}`;
-
-    console.log(
-        "\n--------------------------------"
-    );
-
-    console.log(
-        "MATCHING:",
-        job.title
-    );
-
-    console.log(
-        "Skills:",
-        skills.length
-    );
-
-    console.log(
-        "Roles:",
-        roles.length
-    );
-
-    console.log(
-        "Resume chars:",
-        resumeText.length
-    );
-
-    // ======================================
-    // 1. SKILL MATCH — 50%
-    // ======================================
-
-    let skillScore = 0;
-
-    if (skills.length > 0) {
-
-        let matchedSkills = 0;
-
-        for (const skill of skills) {
-
-            const found =
-                textMatches(
-                    skill,
-                    completeJobText
-                );
-
-            if (found) {
-                matchedSkills++;
-            }
-        }
-
-        skillScore =
-            (
-                matchedSkills /
-                skills.length
-            ) * 100;
-
-        console.log(
-            "Matched skills:",
-            matchedSkills,
-            "/",
-            skills.length
-        );
+    if (!hasResume) {
+        return {
+            matchPercentage: 0,
+            matchedSkills: [],
+            missingSkills: [],
+            explanation:
+                "No resume text on file. Upload your resume on the Profile page to see a match score.",
+            components: { skills: 0, role: 0, description: 0 }
+        };
     }
 
-    // ======================================
-    // FALLBACK:
-    // USE RESUME TEXT
-    // ======================================
+    const userSkills = getUserSkills(profile);
+    const jobSkills = getJobSkills(job);
+    const jobTitle = job.title || "";
+    const jobDescription = job.description || "";
 
-    if (
-        skills.length === 0 &&
-        resumeText.length > 0
-    ) {
+    // 1) SKILLS (50%)
+    const {
+        score: skillScore,
+        matched: matchedSkills,
+        missing: missingSkills
+    } = getSkillComponent(userSkills, jobSkills);
 
-        const commonTech = [
-            "javascript",
-            "typescript",
-            "react",
-            "react.js",
-            "next.js",
-            "node.js",
-            "node",
-            "express",
-            "mongodb",
-            "mysql",
-            "postgresql",
-            "sql",
-            "java",
-            "python",
-            "c++",
-            "c#",
-            "html",
-            "css",
-            "tailwind",
-            "git",
-            "github",
-            "docker",
-            "aws",
-            "azure",
-            "machine learning",
-            "artificial intelligence",
-            "ai",
-            "rest api",
-            "api",
-            "mern",
-            "full stack",
-            "frontend",
-            "backend"
-        ];
+    // 2) ROLE MATCH (30%)
+    const roleScore = getRoleScore(profile, job);
 
-        const resumeTech =
-            commonTech.filter(
-                tech =>
-                    resumeText.includes(
-                        normalize(tech)
-                    )
-            );
-
-        let matchedTech = 0;
-
-        for (const tech of resumeTech) {
-
-            if (
-                textMatches(
-                    tech,
-                    completeJobText
-                )
-            ) {
-                matchedTech++;
-            }
-        }
-
-        if (
-            resumeTech.length > 0
-        ) {
-            skillScore =
-                (
-                    matchedTech /
-                    resumeTech.length
-                ) * 100;
-        }
-
-        console.log(
-            "Fallback resume technologies:",
-            resumeTech
-        );
-
-        console.log(
-            "Fallback matched:",
-            matchedTech,
-            "/",
-            resumeTech.length
-        );
-    }
-
-    // ======================================
-    // 2. ROLE MATCH — 30%
-    // ======================================
-
-    let roleScore = 0;
-
-    if (
-        roles.length > 0 &&
-        title
-    ) {
-
-        let bestRoleScore = 0;
-
-        for (const role of roles) {
-
-            if (
-                title.includes(role) ||
-                role.includes(title)
-            ) {
-                bestRoleScore = 100;
-                break;
-            }
-
-            const roleWords =
-                role
-                    .split(" ")
-                    .filter(
-                        word =>
-                            word.length > 2
-                    );
-
-            if (
-                roleWords.length === 0
-            ) {
-                continue;
-            }
-
-            const matchedWords =
-                roleWords.filter(
-                    word =>
-                        title.includes(word)
-                ).length;
-
-            const currentScore =
-                (
-                    matchedWords /
-                    roleWords.length
-                ) * 100;
-
-            bestRoleScore =
-                Math.max(
-                    bestRoleScore,
-                    currentScore
-                );
-        }
-
-        roleScore =
-            bestRoleScore;
-    }
-
-    console.log(
-        "Role score:",
-        Math.round(roleScore)
-    );
-
-    // ======================================
-    // 3. DESCRIPTION MATCH — 20%
-    // ======================================
-
+    // 3) DESCRIPTION MATCH (20%) — fraction of the user's skills present in
+    //    the job title + description.
     let descriptionScore = 0;
-
-    if (
-        skills.length > 0 &&
-        description
-    ) {
-
-        let matched = 0;
-
-        for (const skill of skills) {
-
-            if (
-                textMatches(
-                    skill,
-                    description
-                )
-            ) {
-                matched++;
-            }
+    if (userSkills.length && jobDescription) {
+        let hit = 0;
+        for (const skill of userSkills) {
+            if (termInText(skill, `${jobTitle} ${jobDescription}`)) hit++;
         }
-
-        descriptionScore =
-            (
-                matched /
-                skills.length
-            ) * 100;
+        descriptionScore = (hit / userSkills.length) * 100;
     }
 
-    // ======================================
-    // FINAL SCORE
-    // ======================================
-
-    const finalScore =
-        (
-            skillScore * 0.50
-        ) +
-        (
-            roleScore * 0.30
-        ) +
-        (
-            descriptionScore * 0.20
-        );
-
-    const result =
-        Math.round(
-            Math.min(
-                100,
-                Math.max(
-                    0,
-                    finalScore
-                )
-            )
-        );
-
-    console.log(
-        "Skill score:",
-        Math.round(skillScore)
+    const finalScore = Math.min(
+        100,
+        Math.max(
+            0,
+            skillScore * WEIGHTS.skills +
+                roleScore * WEIGHTS.role +
+                descriptionScore * WEIGHTS.description
+        )
     );
+    const matchPercentage = Math.round(finalScore);
 
-    console.log(
-        "Description score:",
-        Math.round(descriptionScore)
-    );
+    const parts = [];
+    if (jobSkills.length) {
+        if (matchedSkills.length === jobSkills.length) {
+            parts.push(`You match all ${matchedSkills.length} detected required skill(s).`);
+        } else if (matchedSkills.length > 0) {
+            parts.push(
+                `You match ${matchedSkills.length} of ${jobSkills.length} detected required skill(s).`
+            );
+        } else {
+            parts.push("No overlap on detected required skills.");
+        }
+        if (missingSkills.length) {
+            parts.push(`Consider gaining: ${missingSkills.slice(0, 6).join(", ")}.`);
+        }
+    }
+    if (roleScore >= 80) {
+        parts.push("Your role/skills align well with the job title.");
+    } else if (roleScore > 0) {
+        parts.push("Partial role relevance with the job title.");
+    }
+    if (skillScore === 0 && roleScore === 0 && descriptionScore === 0) {
+        parts.push("Insufficient overlap to score — add skills or upload a detailed resume.");
+    }
 
-    console.log(
-        "FINAL:",
-        result + "%"
-    );
-
-    console.log(
-        "--------------------------------"
-    );
-
-    return result;
+    return {
+        matchPercentage,
+        matchedSkills,
+        missingSkills,
+        explanation: parts.join(" "),
+        components: {
+            skills: Math.round(skillScore),
+            role: Math.round(roleScore),
+            description: Math.round(descriptionScore)
+        }
+    };
 };
+
+/** Backward-compatible numeric accessor (0-100). */
+const calculateMatchScore = (profile, job) =>
+    calculateMatch(profile, job).matchPercentage;
 
 module.exports = {
-    calculateMatchScore
+    calculateMatch,
+    calculateMatchScore,
+    getUserSkills,
+    getJobSkills
 };
+

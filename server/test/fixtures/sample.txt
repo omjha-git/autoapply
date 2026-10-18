@@ -1,0 +1,10 @@
+Jane Doe
+Frontend Developer
+
+Email: jane@example.com | Phone: +1 555-123-4567
+
+Skills: React, JavaScript, Node.js, MongoDB, Docker, AWS
+
+Experience:
+Software Engineer at Acme Corp
+React, Node.js, AWS, Docker
